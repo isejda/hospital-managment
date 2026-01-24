@@ -1,5 +1,5 @@
 from datetime import timedelta, datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from ..database import SessionLocal
 from fastapi import Depends, APIRouter, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -28,7 +28,7 @@ class CreateUserRequest(BaseModel):
     firstname: str = Field(min_length=3, max_length=100)
     lastname: str = Field(min_length=3, max_length=100)
     password: str = Field(min_length=1, max_length=100)
-    role: str = Field(default="user")
+    role: Literal["admin", "doctor", "patient", "secretary"] = Field(default="patient")
     phoneNumber: str = Field(min_length=3, max_length=100)
 
 class Token(BaseModel):
@@ -81,6 +81,15 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='COULD NOT VALIDATE USER')
 
+def require_roles(*allowed_roles: str):
+    def _checker(user: Annotated[dict, Depends(get_current_user)]):
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Authentication failed!')
+        if user.get('role') not in allowed_roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Not enough permissions.')
+        return user
+    return _checker
+
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_user(db: db_dependency,
                       create_user_request: CreateUserRequest):
@@ -108,4 +117,3 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
     token = create_access_token(username=user.username, user_id=user.id, role=user.role, expires_delta=timedelta(minutes=20))
 
     return {'access_token': token, 'token_type': 'bearer'}
-

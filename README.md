@@ -36,4 +36,16 @@ Open:
 - http://127.0.0.1:8000/
 - http://127.0.0.1:8000/docs
 
-# hospital-managment
+# Hospital Management APIs
+Base path: `/hospital`
+
+Core resources:
+- Departments
+- Doctors
+- Patients
+- Appointments
+- Admissions
+- Medications
+- Prescriptions and prescription items
+- Lab tests
+- Invoices and invoice items

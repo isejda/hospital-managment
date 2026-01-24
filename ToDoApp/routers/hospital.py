@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import SessionLocal
+from .auth import get_current_user, require_roles
 from ..models import (
     Admissions,
     Appointments,
@@ -18,6 +19,7 @@ from ..models import (
     Patients,
     PrescriptionItems,
     Prescriptions,
+    Workers,
 )
 
 router = APIRouter(
@@ -35,6 +37,11 @@ def get_db():
 
 
 db_dependency = Annotated[Session, Depends(get_db)]
+user_dependency = Annotated[dict, Depends(get_current_user)]
+admin_dependency = Annotated[dict, Depends(require_roles("admin"))]
+admin_secretary_dependency = Annotated[dict, Depends(require_roles("admin", "secretary"))]
+admin_doctor_dependency = Annotated[dict, Depends(require_roles("admin", "doctor"))]
+staff_dependency = Annotated[dict, Depends(require_roles("admin", "doctor", "secretary"))]
 
 
 def apply_updates(db_obj, data: dict) -> None:
@@ -66,6 +73,7 @@ class DepartmentOut(DepartmentBase):
 
 
 class DoctorBase(BaseModel):
+    user_id: Optional[int] = None
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=100)
@@ -80,6 +88,7 @@ class DoctorCreate(DoctorBase):
 
 
 class DoctorUpdate(BaseModel):
+    user_id: Optional[int] = None
     first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     email: Optional[str] = Field(default=None, min_length=3, max_length=100)
@@ -96,7 +105,41 @@ class DoctorOut(DoctorBase):
         from_attributes = True
 
 
+class WorkerBase(BaseModel):
+    user_id: Optional[int] = None
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=100)
+    phone: Optional[str] = None
+    role: str = Field(min_length=2, max_length=100)
+    department_id: Optional[int] = None
+    is_active: bool = True
+
+
+class WorkerCreate(WorkerBase):
+    pass
+
+
+class WorkerUpdate(BaseModel):
+    user_id: Optional[int] = None
+    first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    phone: Optional[str] = None
+    role: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    department_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class WorkerOut(WorkerBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 class PatientBase(BaseModel):
+    user_id: Optional[int] = None
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     dob: date
@@ -113,6 +156,7 @@ class PatientCreate(PatientBase):
 
 
 class PatientUpdate(BaseModel):
+    user_id: Optional[int] = None
     first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     dob: Optional[date] = None
@@ -338,7 +382,7 @@ class InvoiceItemOut(InvoiceItemBase):
 
 
 @router.post("/departments", response_model=DepartmentOut, status_code=201)
-def create_department(payload: DepartmentCreate, db: db_dependency):
+def create_department(payload: DepartmentCreate, db: db_dependency, user: admin_secretary_dependency):
     department = Departments(**payload.model_dump())
     db.add(department)
     db.commit()
@@ -347,12 +391,12 @@ def create_department(payload: DepartmentCreate, db: db_dependency):
 
 
 @router.get("/departments", response_model=list[DepartmentOut])
-def list_departments(db: db_dependency):
+def list_departments(db: db_dependency, user: staff_dependency):
     return db.query(Departments).all()
 
 
 @router.get("/departments/{department_id}", response_model=DepartmentOut)
-def get_department(db: db_dependency, department_id: int = Path(gt=0)):
+def get_department(db: db_dependency, department_id: int = Path(gt=0), user: staff_dependency = None):
     department = db.query(Departments).filter(Departments.id == department_id).first()
     if department is None:
         raise HTTPException(status_code=404, detail="Department not found.")
@@ -364,6 +408,7 @@ def update_department(
     payload: DepartmentUpdate,
     db: db_dependency,
     department_id: int = Path(gt=0),
+    user: admin_secretary_dependency = None,
 ):
     department = db.query(Departments).filter(Departments.id == department_id).first()
     if department is None:
@@ -376,7 +421,7 @@ def update_department(
 
 
 @router.delete("/departments/{department_id}", status_code=204)
-def delete_department(db: db_dependency, department_id: int = Path(gt=0)):
+def delete_department(db: db_dependency, department_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     department = db.query(Departments).filter(Departments.id == department_id).first()
     if department is None:
         raise HTTPException(status_code=404, detail="Department not found.")
@@ -385,7 +430,7 @@ def delete_department(db: db_dependency, department_id: int = Path(gt=0)):
 
 
 @router.post("/doctors", response_model=DoctorOut, status_code=201)
-def create_doctor(payload: DoctorCreate, db: db_dependency):
+def create_doctor(payload: DoctorCreate, db: db_dependency, user: admin_secretary_dependency):
     doctor = Doctors(**payload.model_dump())
     db.add(doctor)
     db.commit()
@@ -394,12 +439,12 @@ def create_doctor(payload: DoctorCreate, db: db_dependency):
 
 
 @router.get("/doctors", response_model=list[DoctorOut])
-def list_doctors(db: db_dependency):
+def list_doctors(db: db_dependency, user: staff_dependency):
     return db.query(Doctors).all()
 
 
 @router.get("/doctors/{doctor_id}", response_model=DoctorOut)
-def get_doctor(db: db_dependency, doctor_id: int = Path(gt=0)):
+def get_doctor(db: db_dependency, doctor_id: int = Path(gt=0), user: staff_dependency = None):
     doctor = db.query(Doctors).filter(Doctors.id == doctor_id).first()
     if doctor is None:
         raise HTTPException(status_code=404, detail="Doctor not found.")
@@ -407,7 +452,7 @@ def get_doctor(db: db_dependency, doctor_id: int = Path(gt=0)):
 
 
 @router.put("/doctors/{doctor_id}", response_model=DoctorOut)
-def update_doctor(payload: DoctorUpdate, db: db_dependency, doctor_id: int = Path(gt=0)):
+def update_doctor(payload: DoctorUpdate, db: db_dependency, doctor_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     doctor = db.query(Doctors).filter(Doctors.id == doctor_id).first()
     if doctor is None:
         raise HTTPException(status_code=404, detail="Doctor not found.")
@@ -419,7 +464,7 @@ def update_doctor(payload: DoctorUpdate, db: db_dependency, doctor_id: int = Pat
 
 
 @router.delete("/doctors/{doctor_id}", status_code=204)
-def delete_doctor(db: db_dependency, doctor_id: int = Path(gt=0)):
+def delete_doctor(db: db_dependency, doctor_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     doctor = db.query(Doctors).filter(Doctors.id == doctor_id).first()
     if doctor is None:
         raise HTTPException(status_code=404, detail="Doctor not found.")
@@ -427,8 +472,51 @@ def delete_doctor(db: db_dependency, doctor_id: int = Path(gt=0)):
     db.commit()
 
 
+@router.post("/workers", response_model=WorkerOut, status_code=201)
+def create_worker(payload: WorkerCreate, db: db_dependency, user: admin_secretary_dependency):
+    worker = Workers(**payload.model_dump())
+    db.add(worker)
+    db.commit()
+    db.refresh(worker)
+    return worker
+
+
+@router.get("/workers", response_model=list[WorkerOut])
+def list_workers(db: db_dependency, user: admin_secretary_dependency):
+    return db.query(Workers).all()
+
+
+@router.get("/workers/{worker_id}", response_model=WorkerOut)
+def get_worker(db: db_dependency, worker_id: int = Path(gt=0), user: admin_secretary_dependency = None):
+    worker = db.query(Workers).filter(Workers.id == worker_id).first()
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+    return worker
+
+
+@router.put("/workers/{worker_id}", response_model=WorkerOut)
+def update_worker(payload: WorkerUpdate, db: db_dependency, worker_id: int = Path(gt=0), user: admin_secretary_dependency = None):
+    worker = db.query(Workers).filter(Workers.id == worker_id).first()
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+    apply_updates(worker, payload.model_dump(exclude_unset=True))
+    db.add(worker)
+    db.commit()
+    db.refresh(worker)
+    return worker
+
+
+@router.delete("/workers/{worker_id}", status_code=204)
+def delete_worker(db: db_dependency, worker_id: int = Path(gt=0), user: admin_secretary_dependency = None):
+    worker = db.query(Workers).filter(Workers.id == worker_id).first()
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found.")
+    db.delete(worker)
+    db.commit()
+
+
 @router.post("/patients", response_model=PatientOut, status_code=201)
-def create_patient(payload: PatientCreate, db: db_dependency):
+def create_patient(payload: PatientCreate, db: db_dependency, user: admin_secretary_dependency):
     patient = Patients(**payload.model_dump())
     db.add(patient)
     db.commit()
@@ -437,12 +525,12 @@ def create_patient(payload: PatientCreate, db: db_dependency):
 
 
 @router.get("/patients", response_model=list[PatientOut])
-def list_patients(db: db_dependency):
+def list_patients(db: db_dependency, user: staff_dependency):
     return db.query(Patients).all()
 
 
 @router.get("/patients/{patient_id}", response_model=PatientOut)
-def get_patient(db: db_dependency, patient_id: int = Path(gt=0)):
+def get_patient(db: db_dependency, patient_id: int = Path(gt=0), user: staff_dependency = None):
     patient = db.query(Patients).filter(Patients.id == patient_id).first()
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found.")
@@ -450,7 +538,7 @@ def get_patient(db: db_dependency, patient_id: int = Path(gt=0)):
 
 
 @router.put("/patients/{patient_id}", response_model=PatientOut)
-def update_patient(payload: PatientUpdate, db: db_dependency, patient_id: int = Path(gt=0)):
+def update_patient(payload: PatientUpdate, db: db_dependency, patient_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     patient = db.query(Patients).filter(Patients.id == patient_id).first()
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found.")
@@ -462,7 +550,7 @@ def update_patient(payload: PatientUpdate, db: db_dependency, patient_id: int = 
 
 
 @router.delete("/patients/{patient_id}", status_code=204)
-def delete_patient(db: db_dependency, patient_id: int = Path(gt=0)):
+def delete_patient(db: db_dependency, patient_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     patient = db.query(Patients).filter(Patients.id == patient_id).first()
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found.")
@@ -471,7 +559,7 @@ def delete_patient(db: db_dependency, patient_id: int = Path(gt=0)):
 
 
 @router.post("/appointments", response_model=AppointmentOut, status_code=201)
-def create_appointment(payload: AppointmentCreate, db: db_dependency):
+def create_appointment(payload: AppointmentCreate, db: db_dependency, user: staff_dependency):
     appointment = Appointments(**payload.model_dump())
     db.add(appointment)
     db.commit()
@@ -480,12 +568,12 @@ def create_appointment(payload: AppointmentCreate, db: db_dependency):
 
 
 @router.get("/appointments", response_model=list[AppointmentOut])
-def list_appointments(db: db_dependency):
+def list_appointments(db: db_dependency, user: staff_dependency):
     return db.query(Appointments).all()
 
 
 @router.get("/appointments/{appointment_id}", response_model=AppointmentOut)
-def get_appointment(db: db_dependency, appointment_id: int = Path(gt=0)):
+def get_appointment(db: db_dependency, appointment_id: int = Path(gt=0), user: staff_dependency = None):
     appointment = db.query(Appointments).filter(Appointments.id == appointment_id).first()
     if appointment is None:
         raise HTTPException(status_code=404, detail="Appointment not found.")
@@ -497,6 +585,7 @@ def update_appointment(
     payload: AppointmentUpdate,
     db: db_dependency,
     appointment_id: int = Path(gt=0),
+    user: staff_dependency = None,
 ):
     appointment = db.query(Appointments).filter(Appointments.id == appointment_id).first()
     if appointment is None:
@@ -509,7 +598,7 @@ def update_appointment(
 
 
 @router.delete("/appointments/{appointment_id}", status_code=204)
-def delete_appointment(db: db_dependency, appointment_id: int = Path(gt=0)):
+def delete_appointment(db: db_dependency, appointment_id: int = Path(gt=0), user: staff_dependency = None):
     appointment = db.query(Appointments).filter(Appointments.id == appointment_id).first()
     if appointment is None:
         raise HTTPException(status_code=404, detail="Appointment not found.")
@@ -518,7 +607,7 @@ def delete_appointment(db: db_dependency, appointment_id: int = Path(gt=0)):
 
 
 @router.post("/admissions", response_model=AdmissionOut, status_code=201)
-def create_admission(payload: AdmissionCreate, db: db_dependency):
+def create_admission(payload: AdmissionCreate, db: db_dependency, user: admin_doctor_dependency):
     admission = Admissions(**payload.model_dump())
     db.add(admission)
     db.commit()
@@ -527,12 +616,12 @@ def create_admission(payload: AdmissionCreate, db: db_dependency):
 
 
 @router.get("/admissions", response_model=list[AdmissionOut])
-def list_admissions(db: db_dependency):
+def list_admissions(db: db_dependency, user: staff_dependency):
     return db.query(Admissions).all()
 
 
 @router.get("/admissions/{admission_id}", response_model=AdmissionOut)
-def get_admission(db: db_dependency, admission_id: int = Path(gt=0)):
+def get_admission(db: db_dependency, admission_id: int = Path(gt=0), user: staff_dependency = None):
     admission = db.query(Admissions).filter(Admissions.id == admission_id).first()
     if admission is None:
         raise HTTPException(status_code=404, detail="Admission not found.")
@@ -540,7 +629,7 @@ def get_admission(db: db_dependency, admission_id: int = Path(gt=0)):
 
 
 @router.put("/admissions/{admission_id}", response_model=AdmissionOut)
-def update_admission(payload: AdmissionUpdate, db: db_dependency, admission_id: int = Path(gt=0)):
+def update_admission(payload: AdmissionUpdate, db: db_dependency, admission_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     admission = db.query(Admissions).filter(Admissions.id == admission_id).first()
     if admission is None:
         raise HTTPException(status_code=404, detail="Admission not found.")
@@ -552,7 +641,7 @@ def update_admission(payload: AdmissionUpdate, db: db_dependency, admission_id: 
 
 
 @router.delete("/admissions/{admission_id}", status_code=204)
-def delete_admission(db: db_dependency, admission_id: int = Path(gt=0)):
+def delete_admission(db: db_dependency, admission_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     admission = db.query(Admissions).filter(Admissions.id == admission_id).first()
     if admission is None:
         raise HTTPException(status_code=404, detail="Admission not found.")
@@ -561,7 +650,7 @@ def delete_admission(db: db_dependency, admission_id: int = Path(gt=0)):
 
 
 @router.post("/medications", response_model=MedicationOut, status_code=201)
-def create_medication(payload: MedicationCreate, db: db_dependency):
+def create_medication(payload: MedicationCreate, db: db_dependency, user: admin_doctor_dependency):
     medication = Medications(**payload.model_dump())
     db.add(medication)
     db.commit()
@@ -570,12 +659,12 @@ def create_medication(payload: MedicationCreate, db: db_dependency):
 
 
 @router.get("/medications", response_model=list[MedicationOut])
-def list_medications(db: db_dependency):
+def list_medications(db: db_dependency, user: staff_dependency):
     return db.query(Medications).all()
 
 
 @router.get("/medications/{medication_id}", response_model=MedicationOut)
-def get_medication(db: db_dependency, medication_id: int = Path(gt=0)):
+def get_medication(db: db_dependency, medication_id: int = Path(gt=0), user: staff_dependency = None):
     medication = db.query(Medications).filter(Medications.id == medication_id).first()
     if medication is None:
         raise HTTPException(status_code=404, detail="Medication not found.")
@@ -587,6 +676,7 @@ def update_medication(
     payload: MedicationUpdate,
     db: db_dependency,
     medication_id: int = Path(gt=0),
+    user: admin_doctor_dependency = None,
 ):
     medication = db.query(Medications).filter(Medications.id == medication_id).first()
     if medication is None:
@@ -599,7 +689,7 @@ def update_medication(
 
 
 @router.delete("/medications/{medication_id}", status_code=204)
-def delete_medication(db: db_dependency, medication_id: int = Path(gt=0)):
+def delete_medication(db: db_dependency, medication_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     medication = db.query(Medications).filter(Medications.id == medication_id).first()
     if medication is None:
         raise HTTPException(status_code=404, detail="Medication not found.")
@@ -608,7 +698,7 @@ def delete_medication(db: db_dependency, medication_id: int = Path(gt=0)):
 
 
 @router.post("/prescriptions", response_model=PrescriptionOut, status_code=201)
-def create_prescription(payload: PrescriptionCreate, db: db_dependency):
+def create_prescription(payload: PrescriptionCreate, db: db_dependency, user: admin_doctor_dependency):
     prescription = Prescriptions(**payload.model_dump())
     db.add(prescription)
     db.commit()
@@ -617,12 +707,12 @@ def create_prescription(payload: PrescriptionCreate, db: db_dependency):
 
 
 @router.get("/prescriptions", response_model=list[PrescriptionOut])
-def list_prescriptions(db: db_dependency):
+def list_prescriptions(db: db_dependency, user: admin_doctor_dependency):
     return db.query(Prescriptions).all()
 
 
 @router.get("/prescriptions/{prescription_id}", response_model=PrescriptionOut)
-def get_prescription(db: db_dependency, prescription_id: int = Path(gt=0)):
+def get_prescription(db: db_dependency, prescription_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     prescription = db.query(Prescriptions).filter(Prescriptions.id == prescription_id).first()
     if prescription is None:
         raise HTTPException(status_code=404, detail="Prescription not found.")
@@ -634,6 +724,7 @@ def update_prescription(
     payload: PrescriptionUpdate,
     db: db_dependency,
     prescription_id: int = Path(gt=0),
+    user: admin_doctor_dependency = None,
 ):
     prescription = db.query(Prescriptions).filter(Prescriptions.id == prescription_id).first()
     if prescription is None:
@@ -646,7 +737,7 @@ def update_prescription(
 
 
 @router.delete("/prescriptions/{prescription_id}", status_code=204)
-def delete_prescription(db: db_dependency, prescription_id: int = Path(gt=0)):
+def delete_prescription(db: db_dependency, prescription_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     prescription = db.query(Prescriptions).filter(Prescriptions.id == prescription_id).first()
     if prescription is None:
         raise HTTPException(status_code=404, detail="Prescription not found.")
@@ -655,7 +746,7 @@ def delete_prescription(db: db_dependency, prescription_id: int = Path(gt=0)):
 
 
 @router.post("/prescription-items", response_model=PrescriptionItemOut, status_code=201)
-def create_prescription_item(payload: PrescriptionItemCreate, db: db_dependency):
+def create_prescription_item(payload: PrescriptionItemCreate, db: db_dependency, user: admin_doctor_dependency):
     item = PrescriptionItems(**payload.model_dump())
     db.add(item)
     db.commit()
@@ -664,12 +755,12 @@ def create_prescription_item(payload: PrescriptionItemCreate, db: db_dependency)
 
 
 @router.get("/prescription-items", response_model=list[PrescriptionItemOut])
-def list_prescription_items(db: db_dependency):
+def list_prescription_items(db: db_dependency, user: admin_doctor_dependency):
     return db.query(PrescriptionItems).all()
 
 
 @router.get("/prescription-items/{item_id}", response_model=PrescriptionItemOut)
-def get_prescription_item(db: db_dependency, item_id: int = Path(gt=0)):
+def get_prescription_item(db: db_dependency, item_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     item = db.query(PrescriptionItems).filter(PrescriptionItems.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Prescription item not found.")
@@ -681,6 +772,7 @@ def update_prescription_item(
     payload: PrescriptionItemUpdate,
     db: db_dependency,
     item_id: int = Path(gt=0),
+    user: admin_doctor_dependency = None,
 ):
     item = db.query(PrescriptionItems).filter(PrescriptionItems.id == item_id).first()
     if item is None:
@@ -693,7 +785,7 @@ def update_prescription_item(
 
 
 @router.delete("/prescription-items/{item_id}", status_code=204)
-def delete_prescription_item(db: db_dependency, item_id: int = Path(gt=0)):
+def delete_prescription_item(db: db_dependency, item_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     item = db.query(PrescriptionItems).filter(PrescriptionItems.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Prescription item not found.")
@@ -702,7 +794,7 @@ def delete_prescription_item(db: db_dependency, item_id: int = Path(gt=0)):
 
 
 @router.post("/lab-tests", response_model=LabTestOut, status_code=201)
-def create_lab_test(payload: LabTestCreate, db: db_dependency):
+def create_lab_test(payload: LabTestCreate, db: db_dependency, user: admin_doctor_dependency):
     test = LabTests(**payload.model_dump())
     db.add(test)
     db.commit()
@@ -711,12 +803,12 @@ def create_lab_test(payload: LabTestCreate, db: db_dependency):
 
 
 @router.get("/lab-tests", response_model=list[LabTestOut])
-def list_lab_tests(db: db_dependency):
+def list_lab_tests(db: db_dependency, user: admin_doctor_dependency):
     return db.query(LabTests).all()
 
 
 @router.get("/lab-tests/{test_id}", response_model=LabTestOut)
-def get_lab_test(db: db_dependency, test_id: int = Path(gt=0)):
+def get_lab_test(db: db_dependency, test_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     test = db.query(LabTests).filter(LabTests.id == test_id).first()
     if test is None:
         raise HTTPException(status_code=404, detail="Lab test not found.")
@@ -724,7 +816,7 @@ def get_lab_test(db: db_dependency, test_id: int = Path(gt=0)):
 
 
 @router.put("/lab-tests/{test_id}", response_model=LabTestOut)
-def update_lab_test(payload: LabTestUpdate, db: db_dependency, test_id: int = Path(gt=0)):
+def update_lab_test(payload: LabTestUpdate, db: db_dependency, test_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     test = db.query(LabTests).filter(LabTests.id == test_id).first()
     if test is None:
         raise HTTPException(status_code=404, detail="Lab test not found.")
@@ -736,7 +828,7 @@ def update_lab_test(payload: LabTestUpdate, db: db_dependency, test_id: int = Pa
 
 
 @router.delete("/lab-tests/{test_id}", status_code=204)
-def delete_lab_test(db: db_dependency, test_id: int = Path(gt=0)):
+def delete_lab_test(db: db_dependency, test_id: int = Path(gt=0), user: admin_doctor_dependency = None):
     test = db.query(LabTests).filter(LabTests.id == test_id).first()
     if test is None:
         raise HTTPException(status_code=404, detail="Lab test not found.")
@@ -745,7 +837,7 @@ def delete_lab_test(db: db_dependency, test_id: int = Path(gt=0)):
 
 
 @router.post("/invoices", response_model=InvoiceOut, status_code=201)
-def create_invoice(payload: InvoiceCreate, db: db_dependency):
+def create_invoice(payload: InvoiceCreate, db: db_dependency, user: admin_secretary_dependency):
     invoice = Invoices(**payload.model_dump())
     db.add(invoice)
     db.commit()
@@ -754,12 +846,12 @@ def create_invoice(payload: InvoiceCreate, db: db_dependency):
 
 
 @router.get("/invoices", response_model=list[InvoiceOut])
-def list_invoices(db: db_dependency):
+def list_invoices(db: db_dependency, user: admin_secretary_dependency):
     return db.query(Invoices).all()
 
 
 @router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
-def get_invoice(db: db_dependency, invoice_id: int = Path(gt=0)):
+def get_invoice(db: db_dependency, invoice_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     invoice = db.query(Invoices).filter(Invoices.id == invoice_id).first()
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -767,7 +859,7 @@ def get_invoice(db: db_dependency, invoice_id: int = Path(gt=0)):
 
 
 @router.put("/invoices/{invoice_id}", response_model=InvoiceOut)
-def update_invoice(payload: InvoiceUpdate, db: db_dependency, invoice_id: int = Path(gt=0)):
+def update_invoice(payload: InvoiceUpdate, db: db_dependency, invoice_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     invoice = db.query(Invoices).filter(Invoices.id == invoice_id).first()
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -779,7 +871,7 @@ def update_invoice(payload: InvoiceUpdate, db: db_dependency, invoice_id: int = 
 
 
 @router.delete("/invoices/{invoice_id}", status_code=204)
-def delete_invoice(db: db_dependency, invoice_id: int = Path(gt=0)):
+def delete_invoice(db: db_dependency, invoice_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     invoice = db.query(Invoices).filter(Invoices.id == invoice_id).first()
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -788,7 +880,7 @@ def delete_invoice(db: db_dependency, invoice_id: int = Path(gt=0)):
 
 
 @router.post("/invoice-items", response_model=InvoiceItemOut, status_code=201)
-def create_invoice_item(payload: InvoiceItemCreate, db: db_dependency):
+def create_invoice_item(payload: InvoiceItemCreate, db: db_dependency, user: admin_secretary_dependency):
     item = InvoiceItems(**payload.model_dump())
     db.add(item)
     db.commit()
@@ -797,12 +889,12 @@ def create_invoice_item(payload: InvoiceItemCreate, db: db_dependency):
 
 
 @router.get("/invoice-items", response_model=list[InvoiceItemOut])
-def list_invoice_items(db: db_dependency):
+def list_invoice_items(db: db_dependency, user: admin_secretary_dependency):
     return db.query(InvoiceItems).all()
 
 
 @router.get("/invoice-items/{item_id}", response_model=InvoiceItemOut)
-def get_invoice_item(db: db_dependency, item_id: int = Path(gt=0)):
+def get_invoice_item(db: db_dependency, item_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     item = db.query(InvoiceItems).filter(InvoiceItems.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Invoice item not found.")
@@ -810,7 +902,7 @@ def get_invoice_item(db: db_dependency, item_id: int = Path(gt=0)):
 
 
 @router.put("/invoice-items/{item_id}", response_model=InvoiceItemOut)
-def update_invoice_item(payload: InvoiceItemUpdate, db: db_dependency, item_id: int = Path(gt=0)):
+def update_invoice_item(payload: InvoiceItemUpdate, db: db_dependency, item_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     item = db.query(InvoiceItems).filter(InvoiceItems.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Invoice item not found.")
@@ -822,7 +914,7 @@ def update_invoice_item(payload: InvoiceItemUpdate, db: db_dependency, item_id: 
 
 
 @router.delete("/invoice-items/{item_id}", status_code=204)
-def delete_invoice_item(db: db_dependency, item_id: int = Path(gt=0)):
+def delete_invoice_item(db: db_dependency, item_id: int = Path(gt=0), user: admin_secretary_dependency = None):
     item = db.query(InvoiceItems).filter(InvoiceItems.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Invoice item not found.")

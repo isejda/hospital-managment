@@ -6,31 +6,21 @@ class Users(Base):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True)
-    username = Column(String, unique=True)
-    firstname = Column(String)
-    lastname = Column(String)
-    hashed_password = Column(String)
+    email = Column(String(255), unique=True, index=True)
+    username = Column(String(255), unique=True, index=True)
+    firstname = Column(String(255))
+    lastname = Column(String(255))
+    hashed_password = Column(String(255))
     is_active = Column(Boolean, default=True)
-    role = Column(String)
-    phoneNumber = Column(String)
-
-class Todos(Base):
-    __tablename__ = 'todos'
-
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String)
-    description = Column(String)
-    priority = Column(Integer)
-    complete = Column(Boolean)
-    owner_id = Column(Integer, ForeignKey('users.id'))
+    role = Column(String(50))
+    phoneNumber = Column(String(50))
 
 
 class Departments(Base):
     __tablename__ = 'departments'
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String(255), unique=True, index=True)
     description = Column(Text)
     location = Column(String)
 
@@ -39,11 +29,26 @@ class Doctors(Base):
     __tablename__ = 'doctors'
 
     id = Column(Integer, primary_key=True, index=True)
-    first_name = Column(String, index=True)
-    last_name = Column(String, index=True)
-    email = Column(String, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), unique=True, index=True, nullable=True)
+    first_name = Column(String(255), index=True)
+    last_name = Column(String(255), index=True)
+    email = Column(String(255), unique=True, index=True)
     phone = Column(String)
     specialization = Column(String)
+    department_id = Column(Integer, ForeignKey('departments.id'))
+    is_active = Column(Boolean, default=True)
+
+
+class Workers(Base):
+    __tablename__ = 'workers'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), unique=True, index=True, nullable=True)
+    first_name = Column(String(255), index=True)
+    last_name = Column(String(255), index=True)
+    email = Column(String(255), unique=True, index=True)
+    phone = Column(String)
+    role = Column(String(100))
     department_id = Column(Integer, ForeignKey('departments.id'))
     is_active = Column(Boolean, default=True)
 
@@ -52,12 +57,13 @@ class Patients(Base):
     __tablename__ = 'patients'
 
     id = Column(Integer, primary_key=True, index=True)
-    first_name = Column(String, index=True)
-    last_name = Column(String, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), unique=True, index=True, nullable=True)
+    first_name = Column(String(255), index=True)
+    last_name = Column(String(255), index=True)
     dob = Column(Date)
     gender = Column(String)
     phone = Column(String)
-    email = Column(String, unique=True, index=True)
+    email = Column(String(255), unique=True, index=True)
     address = Column(String)
     emergency_contact_name = Column(String)
     emergency_contact_phone = Column(String)
@@ -90,7 +96,7 @@ class Medications(Base):
     __tablename__ = 'medications'
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String(255), unique=True, index=True)
     description = Column(Text)
 
 
@@ -121,7 +127,7 @@ class LabTests(Base):
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey('patients.id'))
     ordered_by_doctor_id = Column(Integer, ForeignKey('doctors.id'))
-    test_name = Column(String, index=True)
+    test_name = Column(String(255), index=True)
     ordered_at = Column(DateTime)
     result = Column(Text)
     status = Column(String, default="ordered")

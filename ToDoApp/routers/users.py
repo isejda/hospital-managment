@@ -2,7 +2,6 @@ from typing import Annotated
 
 from ..database import SessionLocal
 from fastapi import Depends, HTTPException, APIRouter
-from ..models import Todos
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -64,7 +63,7 @@ async def change_password(user:user_dependency, db:db_dependency, user_request:U
     if not bcrypt_context.verify(user_request.password, user_model.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Please enter the correct password.')
 
-    user_model.hashed_password = bcrypt_context.encrypt(user_request.password)
+    user_model.hashed_password = bcrypt_context.hash(user_request.new_password)
     db.add(user_model)
     db.commit()
 
